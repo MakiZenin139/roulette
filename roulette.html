@@ -710,29 +710,23 @@ function startCD(onDone){
 // SPIN
 // ════════════════════════════════════════════
 function doSpin(){
-  if(S.spins <= 0){ goTab('pay'); return; }
+  if(S.spins <= 0 && !IS_ADMIN){ goTab('pay'); return; }
   if(spinning) return;
-  if(secSince() < COOLDOWN && getLS() > 0){ startCD(); return; }
 
   spinning=true;
   playSpinSound();
-  document.getElementById('spinBtn').disabled=true;
+  const btn=document.getElementById('spinBtn');
+  btn.disabled=true;
   const res=document.getElementById('resultBox');
   res.className='result-box'; res.textContent='🎰 Крутится...';
 
-  // списываем прокрут только не-админам
-  if(!IS_ADMIN) { S.spins = Math.max(0, S.spins - 1); }
+  if(!IS_ADMIN){ S.spins = Math.max(0, S.spins-1); }
   updateSpinBadge();
 
-  const rnd=Math.random()*TOT; let acc=0, win=PRIZES[PRIZES.length-1];
-  for(const p of PRIZES){ acc+=p.weight; if(rnd<acc){win=p;break;} }
-
-  const extra=(5+Math.floor(Math.random()*5))*Math.PI*2;
-  const need=((-Math.PI/2-win.m)%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
-  const tot=need+extra;
-  const dur=4000+Math.random()*1500;
-  const sA=wA,sT=performance.now();
-
+  // Крутим колесо на случайный угол (красота — бот сам выберет приз)
+  const tot = (5+Math.floor(Math.random()*6))*Math.PI*2 + Math.random()*Math.PI*2;
+  const dur = 4000+Math.random()*1500;
+  const sA=wA, sT=performance.now();
   function ease(t){ return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2; }
 
   (function frame(now){
@@ -740,49 +734,30 @@ function doSpin(){
     wA=sA+tot*ease(p); drawWheel(wA);
     if(p<1){ requestAnimationFrame(frame); return; }
 
-    spinning=false; setLS();
-
-    if(win.type==='key'){
-      S.keys++;
-      res.className='result-box jackpot';
-      res.textContent='🏆 ДЖЕКПОТ! '+win.label+'!';
-      playJackpotSound();
-      if(tg) tg.HapticFeedback?.notificationOccurred('success');
-    } else {
-      S.coins+=win.amount;
-      res.className='result-box win';
-      res.textContent=`🎉 Выигрыш: ${win.label}! (+${win.amount} ₽)`;
-      playWinSound();
-      if(tg) tg.HapticFeedback?.impactOccurred('medium');
+    // Анимация закончилась
+    spinning=false;
+    if(tg && typeof tg.HapticFeedback !== 'undefined'){
+      tg.HapticFeedback.impactOccurred('medium');
     }
 
-    // ── Отправляем результат боту → он обновит БД ──
+    res.className='result-box win';
+    res.textContent='✅ Готово! Результат придёт в чат 👇';
+
+    // Отправляем боту запрос на прокрут — БОТ сам выбирает приз и шлёт монеты
     if(tg && tg.sendData){
-      tg.sendData(JSON.stringify({
-        action: 'spin_result',
-        uid:    S.uid,
-        amount: win.amount,
-        isKey:  win.type==='key',
-        label:  win.label
-      }));
-      // sendData закрывает WebApp — дальнейший код не нужен
-      return;
-    }
-
-    S.history.unshift({label:win.label,amount:win.amount,isKey:win.type==='key',
-      time:new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'})});
-    if(S.history.length>20) S.history.pop();
-
-    renderProfile();
-
-    if(S.spins > 0){
-      startCD(); // кулдаун — потом следующий прокрут
+      setTimeout(()=>{
+        tg.sendData(JSON.stringify({ action:'spin_request', uid: S.uid }));
+        // sendData закрывает WebApp
+      }, 1200);
     } else {
-      // прокруты закончились
-      res.textContent += ' | Прокруты закончились!';
-      document.getElementById('spinBtn').disabled=true;
-      document.getElementById('spinBtn').textContent='💳 Купить прокруты';
-      document.getElementById('spinBtn').onclick=()=>goTab('pay');
+      // Демо-режим без Telegram
+      const rnd=Math.random()*TOT; let acc=0, win=PRIZES[PRIZES.length-1];
+      for(const p of PRIZES){ acc+=p.weight; if(rnd<acc){win=p;break;} }
+      res.textContent = win.type==='key'
+        ? '🏆 ДЖЕКПОТ! '+win.label+'!'
+        : `🎉 Выигрыш: ${win.label}! (+${win.amount} ₽)`;
+      if(S.spins > 0) setTimeout(()=>{ btn.disabled=false; }, 3000);
+      else { btn.textContent='💳 Купить прокруты'; btn.onclick=()=>goTab('pay'); }
     }
   })(performance.now());
 }
