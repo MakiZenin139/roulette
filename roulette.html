@@ -345,8 +345,6 @@ html,body { width:100%; min-height:100vh; background:var(--bg); color:var(--text
     </div>
 
     <div class="stats-grid">
-      <div class="stat-card"><div class="slabel">Монет выиграно</div><div class="sval green" id="statCoins">0 ₽</div></div>
-      <div class="stat-card"><div class="slabel">Всего прокрутов</div><div class="sval" id="statSpins">0</div></div>
       <div class="stat-card"><div class="slabel">Ключей выиграно</div><div class="sval gold" id="statKeys">0</div></div>
       <div class="stat-card"><div class="slabel">Потрачено</div><div class="sval mg" id="statSpent">0 ₽</div></div>
     </div>
@@ -490,6 +488,64 @@ html,body { width:100%; min-height:100vh; background:var(--bg); color:var(--text
 <div class="toast" id="toast"></div>
 
 <script>
+// ════════════════════════════════════════════
+// SOUNDS (Web Audio API — без файлов)
+// ════════════════════════════════════════════
+const AC = (()=>{ try { return new (window.AudioContext||window.webkitAudioContext)(); } catch(e){ return null; } })();
+
+function unlockAudio(){
+  if(!AC || AC.state !== 'suspended') return;
+  AC.resume();
+}
+document.addEventListener('touchstart', unlockAudio, {once:true});
+document.addEventListener('click',      unlockAudio, {once:true});
+
+function playSpinSound(){
+  if(!AC) return;
+  // Тиканье колеса
+  let t = AC.currentTime;
+  for(let i=0;i<18;i++){
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.connect(g); g.connect(AC.destination);
+    const freq = 400 + i*15;
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.08, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t+0.06);
+    o.start(t); o.stop(t+0.07);
+    t += 0.22 - i*0.009;
+  }
+}
+
+function playWinSound(){
+  if(!AC) return;
+  const notes=[523,659,784,1047];
+  notes.forEach((freq,i)=>{
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.type='sine'; o.connect(g); g.connect(AC.destination);
+    const t=AC.currentTime+i*0.12;
+    o.frequency.setValueAtTime(freq,t);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.18,t+0.04);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.38);
+    o.start(t); o.stop(t+0.4);
+  });
+}
+
+function playJackpotSound(){
+  if(!AC) return;
+  const notes=[523,659,784,1047,1319,1568];
+  notes.forEach((freq,i)=>{
+    const o=AC.createOscillator(), g=AC.createGain();
+    o.type='triangle'; o.connect(g); g.connect(AC.destination);
+    const t=AC.currentTime+i*0.1;
+    o.frequency.setValueAtTime(freq,t);
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(0.22,t+0.05);
+    g.gain.exponentialRampToValueAtTime(0.001,t+0.5);
+    o.start(t); o.stop(t+0.55);
+  });
+}
+
 // ════════════════════════════════════════════
 // TELEGRAM WEB APP
 // ════════════════════════════════════════════
@@ -659,6 +715,7 @@ function doSpin(){
   if(secSince() < COOLDOWN && getLS() > 0){ startCD(); return; }
 
   spinning=true;
+  playSpinSound();
   document.getElementById('spinBtn').disabled=true;
   const res=document.getElementById('resultBox');
   res.className='result-box'; res.textContent='🎰 Крутится...';
@@ -684,18 +741,32 @@ function doSpin(){
     if(p<1){ requestAnimationFrame(frame); return; }
 
     spinning=false; setLS();
-    S.spinsTotal++;
 
     if(win.type==='key'){
       S.keys++;
       res.className='result-box jackpot';
       res.textContent='🏆 ДЖЕКПОТ! '+win.label+'!';
+      playJackpotSound();
       if(tg) tg.HapticFeedback?.notificationOccurred('success');
     } else {
       S.coins+=win.amount;
       res.className='result-box win';
       res.textContent=`🎉 Выигрыш: ${win.label}! (+${win.amount} ₽)`;
+      playWinSound();
       if(tg) tg.HapticFeedback?.impactOccurred('medium');
+    }
+
+    // ── Отправляем результат боту → он обновит БД ──
+    if(tg && tg.sendData){
+      tg.sendData(JSON.stringify({
+        action: 'spin_result',
+        uid:    S.uid,
+        amount: win.amount,
+        isKey:  win.type==='key',
+        label:  win.label
+      }));
+      // sendData закрывает WebApp — дальнейший код не нужен
+      return;
     }
 
     S.history.unshift({label:win.label,amount:win.amount,isKey:win.type==='key',
@@ -734,8 +805,6 @@ function renderProfile(){
     const av=document.getElementById('avatarEl'); av.innerHTML=''; av.appendChild(img);
   }
 
-  document.getElementById('statCoins').textContent = S.coins.toFixed(0)+' ₽';
-  document.getElementById('statSpins').textContent = S.spinsTotal;
   document.getElementById('statKeys').textContent  = S.keys;
   document.getElementById('statSpent').textContent = S.spent+' ₽';
 
